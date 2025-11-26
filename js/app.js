@@ -1,8 +1,5 @@
 // 配置
 const CONFIG = {
-    API_KEY: '',//把你申请的api放在这里 单引号里面
-    API_URL: 'https://api.deepseek.com/chat/completions',
-    MODEL: 'deepseek-chat',
     IMAGES: {
         idle: 'images/krueger_idle.png',
         shy: 'images/krueger_blush.png',
@@ -62,8 +59,7 @@ createApp({
         });
         
         watch(() => state.value.isShaking, (newValue) => {
-            // 只在摇晃状态变化时更新图片
-            if (!newValue) { // 摇晃结束时才更新
+            if (!newValue) { 
                 updateCharacterImage(state.value.loveScore, newValue);
             }
         });
@@ -71,7 +67,6 @@ createApp({
         // 初始化
         onMounted(() => {
             typeWriter(state.value.fullResponse);
-            // 确保初始图片正确
             updateCharacterImage(state.value.loveScore, state.value.isShaking);
         });
 
@@ -87,7 +82,6 @@ createApp({
                 newImage = CONFIG.IMAGES.shy;
             }
             
-            // 只有当图片确实变化时才更新，避免不必要的重渲染
             if (state.value.currentImage !== newImage) {
                 state.value.currentImage = newImage;
             }
@@ -158,80 +152,57 @@ createApp({
             }
         };
 
-        const getSystemPrompt = () => {
-            let relationship = "你还不信任用户，保持职业距离，冷酷，但是对用户比较温柔和客气";
-            if (state.value.loveScore > 40) relationship = "你开始认可用户的能力，语气稍微缓和，愿意交流战术话题。";
-            if (state.value.loveScore > 80) relationship = "你极度信任用户，甚至产生了依赖和保护欲。语气虽然依旧简练，但充满了隐含的温柔。";
-
-            return `你现在进行角色扮演。
-            角色：Krueger (使命召唤)。
-            设定：奥地利人，KSK背景，戴着网状头套，沉默寡言，战术专家。身高178cm
-            语言风格：非常简练，不喜欢废话。偶尔会夹杂德语单词（如 Ja, Nein, Danke, Verstanden, Was?）。
-            当前状态：在安全屋休息 回避型依恋 对用户有一定好感 。
-            与用户的关系：${relationship}
-            当前好感度：${state.value.loveScore}%。
-            要求：
-            1. 绝对不要使用Markdown格式。
-            2. 回复长度控制在50字以内。
-            3. 不要描写动作（不要用括号描写心理活动），只输出你说的话。
-            4. 如果用户试图摘你面罩，低好感度时要拒绝。`;
+        // 替换AI为固定回复（纯静态核心修改）
+        const getStaticReply = (promptText, loveScore) => {
+            // 触摸互动的回复
+            if (promptText.includes("摸你的头")) {
+                if (loveScore < 30) return "保持距离，别碰我。";
+                if (loveScore < 80) return "Ja...别随便碰我的头套。";
+                return "Danke，搭档。";
+            }
+            if (promptText.includes("拍你的肩膀")) {
+                if (loveScore < 40) return "别碰我。";
+                if (loveScore < 80) return "有什么指示？";
+                return "随时待命。";
+            }
+            if (promptText.includes("碰了你的武器")) {
+                if (loveScore < 50) return "别动我的装备。";
+                if (loveScore < 80) return "小心点，这是精密仪器。";
+                return "想学怎么用吗？";
+            }
+            // 事件互动的回复
+            if (promptText.includes("单兵口粮")) return "补给收到，很实用。感谢。";
+            if (promptText.includes("擦拭武器")) return "武器保养很重要，谢了。";
+            if (promptText.includes("战术训练")) return "Verstanden，训练现在开始。";
+            // 用户输入指令的回复
+            const randomReplies = [
+                "收到指令，保持警惕。",
+                "Was？再说一遍？",
+                "Ja，按计划执行。",
+                "安全屋周围无异常。"
+            ];
+            return randomReplies[Math.floor(Math.random() * randomReplies.length)];
         };
 
-        const callAI = async (promptText) => {
-            if (!CONFIG.API_KEY || CONFIG.API_KEY.includes('这里填')) {
-                state.value.fullResponse = "SYSTEM ERROR: 请先在代码中配置 API Key。";
-                typeWriter(state.value.fullResponse);
-                return;
-            }
-
+        // 替换原callAI为纯静态版本
+        const callStaticReply = (promptText) => {
             state.value.isThinking = true;
             
-            const messages = [
-                { role: "system", content: getSystemPrompt() },
-                ...state.value.chatHistory.slice(-6),
-                { role: "user", content: promptText }
-            ];
+            // 模拟思考延迟
+            setTimeout(() => {
+                const reply = getStaticReply(promptText, state.value.loveScore);
+                state.value.fullResponse = reply;
+                typeWriter(reply);
 
-            try {
-                const res = await fetch(CONFIG.API_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${CONFIG.API_KEY}`
-                    },
-                    body: JSON.stringify({
-                        model: CONFIG.MODEL,
-                        messages: messages,
-                        temperature: 0.8,
-                        max_tokens: 100
-                    })
-                });
-
-                const data = await res.json();
+                state.value.chatHistory.push({ role: "user", content: promptText });
+                state.value.chatHistory.push({ role: "assistant", content: reply });
                 
-                if (data.choices && data.choices[0]) {
-                    const reply = data.choices[0].message.content;
-                    state.value.fullResponse = reply;
-                    typeWriter(reply);
-
-                    state.value.chatHistory.push({ role: "user", content: promptText });
-                    state.value.chatHistory.push({ role: "assistant", content: reply });
-                    
-                    state.value.dialogueCount++;
-                    updateMission(0);
-                    
-                    playSound('message');
-                } else {
-                    throw new Error("API返回格式异常");
-                }
-
-            } catch (e) {
-                console.error(e);
-                state.value.fullResponse = "(通讯干扰) ...再说一遍？";
-                typeWriter(state.value.fullResponse);
-            } finally {
+                state.value.dialogueCount++;
+                updateMission(0);
+                
+                playSound('message');
                 state.value.isThinking = false;
-            }
+            }, 1200);
         };
 
         const sendMessage = () => {
@@ -239,21 +210,18 @@ createApp({
             const text = state.value.userInput;
             state.value.userInput = '';
             playSound('button');
-            callAI(text);
+            callStaticReply(text);
         };
 
         const handleTouch = (zone) => {
             if (state.value.isThinking) return;
             
-            // 设置摇晃状态
             state.value.isShaking = true;
             setTimeout(() => {
                 state.value.isShaking = false;
-                // 摇晃结束后更新图片
                 updateCharacterImage(state.value.loveScore, false);
             }, 400);
             
-            // 随机眨眼
             if (Math.random() > 0.7) {
                 state.value.isBlinking = true;
                 setTimeout(() => state.value.isBlinking = false, 300);
@@ -270,43 +238,42 @@ createApp({
 
             if (zone === 'head') {
                 if (state.value.loveScore < 30) {
-                    prompt = "（用户试图摸你的头）我很反感，警告用户。";
+                    prompt = "（用户试图摸你的头）";
                     scoreChange = 1;
                 } else if (state.value.loveScore < 80) {
-                    prompt = "（用户摸你的头）我不习惯这种接触，但没有推开。";
+                    prompt = "（用户摸你的头）";
                     scoreChange = 3;
                 } else {
-                    prompt = "（用户摸你的头）我像大型犬一样享受这种抚摸。";
+                    prompt = "（用户摸你的头）";
                     scoreChange = 5;
                 }
             } else if (zone === 'shoulder') {
                 if (state.value.loveScore < 40) {
-                    prompt = "（用户拍你的肩膀）别碰我。";
+                    prompt = "（用户拍你的肩膀）";
                     scoreChange = 1;
                 } else if (state.value.loveScore < 80) {
-                    prompt = "（用户拍你的肩膀）有什么事？";
+                    prompt = "（用户拍你的肩膀）";
                     scoreChange = 2;
                 } else {
-                    prompt = "（用户拍你的肩膀）随时待命。";
+                    prompt = "（用户拍你的肩膀）";
                     scoreChange = 4;
                 }
             } else if (zone === 'weapon') {
                 if (state.value.loveScore < 50) {
-                    prompt = "（用户碰了你的武器）别动我的装备。";
+                    prompt = "（用户碰了你的武器）";
                     scoreChange = 1;
                 } else if (state.value.loveScore < 80) {
-                    prompt = "（用户碰了你的武器）小心点，这是精密仪器。";
+                    prompt = "（用户碰了你的武器）";
                     scoreChange = 2;
                 } else {
-                    prompt = "（用户碰了你的武器）想学怎么用吗？";
+                    prompt = "（用户碰了你的武器）";
                     scoreChange = 4;
                 }
             }
 
             state.value.loveScore = Math.min(100, state.value.loveScore + scoreChange);
-            // 好感度变化后立即更新图片
             updateCharacterImage(state.value.loveScore, state.value.isShaking);
-            callAI(prompt);
+            callStaticReply(prompt);
         };
 
         const triggerEvent = (type) => {
@@ -331,9 +298,8 @@ createApp({
             }
             
             state.value.loveScore = Math.min(100, state.value.loveScore + scoreChange);
-            // 确保图片更新
             updateCharacterImage(state.value.loveScore, state.value.isShaking);
-            callAI(prompt);
+            callStaticReply(prompt);
         };
 
         return {
